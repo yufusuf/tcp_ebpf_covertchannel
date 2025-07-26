@@ -25,9 +25,10 @@
 #define get_key_index(x) ((x) & 0xFF)
 
 #define MESSAGE_SIZE 32
-#define OCCUPATION 2
+#define OCCUPATION 3
 
-const volatile char message[MESSAGE_SIZE] = "covert message";
+__u8 is_done = 0;
+__u32 cur_idx = 0;
 
 static __always_inline int get_tsval(struct tcphdr *tcph, __u32 **tsval, void *data_end) {
     // generally tsval is at the 23rd byte
@@ -44,11 +45,23 @@ static __always_inline int get_tsval(struct tcphdr *tcph, __u32 **tsval, void *d
     *tsval = (__u32 *)(options + 4);
     return 0;
 }
+
+static __always_inline void reset_tx_cnt(void)
+{
+    for (__u32 i = 0; i < 256; i++) {
+        __u32 k = i;
+        __u64 *v = bpf_map_lookup_elem(&tx_cnt, &k);
+        if (v)
+            bpf_map_update_elem(&tx_cnt, &k, &((__u64){0}), BPF_ANY);
+
+    }
+}
+
 static __always_inline void incr_tx_count(__u32 bit_index) {
-    __u32 *tscount = bpf_map_lookup_elem(&tx_cnt, &bit_index);
+    __u64 *tscount = bpf_map_lookup_elem(&tx_cnt, &bit_index);
     if (tscount) {
-        __u32 new_value = ++(*tscount);
-        if( new_value != OCCUPATION)
+        __u64 old_val = __sync_fetch_and_add(tscount, 1);
+        if( old_val  !=  OCCUPATION)
             return;
         
         __u32 key = 0;
@@ -59,7 +72,14 @@ static __always_inline void incr_tx_count(__u32 bit_index) {
         }
         __u64 prev = __sync_fetch_and_add(done, 1);
         if( prev + 1 == MESSAGE_SIZE * 8) {
-            bpf_printk("All bits transmitted successfully, exiting...\n");
+            __sync_fetch_and_add(&cur_idx, 1);
+            *done = 0;
+            reset_tx_cnt();
+            bpf_printk("All bits transmitted successfully, next index:%u \n", cur_idx);
+            if(cur_idx == 27){
+                is_done = 1;
+                bpf_printk("Transmission completed, stopping further processing.\n");
+            }
         }
 
     }
@@ -74,6 +94,10 @@ int tcp_processor(struct __sk_buff *skb) {
     void *data = (void *)(long)skb->data;
     struct hdr_cursor nh = {.pos = data};
     int eth_type, ip_type, ret = TC_ACT_OK;
+
+    if (is_done)
+        goto out;
+
     struct iphdr *iphdr;
     struct tcphdr *tcph;
     struct ethhdr *eth;
@@ -108,17 +132,18 @@ int tcp_processor(struct __sk_buff *skb) {
             __u32 crc = tcp_header_crc32(tcpheader);
             __u8 bit_index = get_key_index(crc);
             __u8 key_bit = get_key_bit(crc);
+            __u32 key = cur_idx;
+            __u8 *message = bpf_map_lookup_elem(&message_map, &key);
+            if(!message)
+            {
+                bpf_printk("Failed to lookup message map\n");
+                goto out;
+            }
+            //print current message
+            // bpf_printk("Current message: %28s\n", message);
             __u8 plain_text_bit = message[bit_index / 8] >> (7 - (bit_index % 8)) & 0x01;
             __u8 hashed_bit = key_bit ^ plain_text_bit;
 
-            // // print packet source and destination ip's
-            // bpf_printk("IP packet: src=%u, dst=%u\n", bpf_ntohl(iphdr->saddr), bpf_ntohl(iphdr->daddr));
-            // // print sequence number only
-            // bpf_printk("TCP packet: seq=%u\n", bpf_ntohl(tcph->seq));
-            // bpf_printk("TCP header CRC32: %u\n", crc);
-            // bpf_printk("TCP timestamp value: %u\n", bpf_ntohl(*tsval));
-            // bpf_printk("Bit index: %u, Key bit: %u, Plain text bit: %u, Hashed bit: %u\n", bit_index, key_bit,
-            //            plain_text_bit, hashed_bit);
             if ((bpf_ntohl(*tsval) & 1) != hashed_bit) {
                 *tsval = bpf_htonl(bpf_ntohl(*tsval) + 1);
             }
@@ -130,20 +155,6 @@ int tcp_processor(struct __sk_buff *skb) {
             bpf_printk("TCP timestamp option not found or invalid\n");
             goto out;
         }
-        // print packet info
-        // bpf_printk("TCP packet: src=%u, dst=%u, seq=%u, ack_seq=%u\n", bpf_ntohs(tcph->source),
-        // bpf_ntohs(tcph->dest),
-        //            bpf_ntohl(tcph->seq), bpf_ntohl(tcph->ack_seq));
-        // print 20 bytes
-        // bpf_printk("TCP header: ");
-        // for (int i = 0; i < 20; i++) {
-        //     bpf_printk("%02x ", tcpheader[i]);
-        // }
-        // print second index of crc_tab
-
-        // tcphdr->check += bpf_htons(-1);
-        // if (!tcphdr->check)
-        //     tcphdr->check += bpf_htons(-1);
     }
 
 out:

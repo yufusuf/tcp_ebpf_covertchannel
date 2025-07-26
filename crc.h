@@ -55,7 +55,6 @@ const __u32 crc32_tab[256] = {
     0x54de5729, 0x23d967bf, 0xb3667a2e, 0xc4614ab8, 0x5d681b02, 0x2a6f2b94,
     0xb40bbe37, 0xc30c8ea1, 0x5a05df1b, 0x2d02ef8d};
 static __always_inline __u32 tcp_header_crc32(__u8 *tcph) {
-  /* verifier bound: TCP header max 60 bytes (20 + 40 opt)    */
   __u32 crc = ~0U;
 
   // #pragma unroll TODO: unrolling this loop makes verifier complain

@@ -8,8 +8,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <pthread.h>
 
-char message[256] = {0};
+char message[32] = {0};
 
 uint32_t crc32(const unsigned char *data, size_t length) {
     uint32_t crc = 0xFFFFFFFF;
@@ -35,16 +36,18 @@ uint32_t *get_tsval(struct tcphdr *tcph) {
     return (uint32_t *)(options + 4);
 }
 
+pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 void packet_handler(u_char *user, const struct pcap_pkthdr *h, const u_char *bytes) {
     struct iphdr *ip = (struct iphdr *)(bytes + sizeof(struct ethhdr));
     struct tcphdr *tcph = (struct tcphdr *)(bytes + sizeof(struct ethhdr) + ip->ihl * 4);
-    if (tcph->syn || tcph->fin)
+    if (tcph->syn || tcph->fin || tcph->rst)
         return;
     unsigned char bit_index;
     unsigned char key_bit;
     unsigned char plain_text_bit;
     unsigned char cipher_text_bit;
     uint32_t tsval;
+    uint32_t crc;
 
     tcph->check = 0;
     uint32_t digest = crc32((unsigned char *)tcph, sizeof(struct tcphdr));
@@ -55,20 +58,27 @@ void packet_handler(u_char *user, const struct pcap_pkthdr *h, const u_char *byt
         fprintf(stderr, "Failed to get timestamp value.\n");
         return;
     }
-    cipher_text_bit = tsval & 1;
+    cipher_text_bit = tsval & 0x01;
     plain_text_bit = key_bit ^ cipher_text_bit;
     size_t byte_idx = bit_index / 8;
     uint8_t bit_pos = 7 - (bit_index % 8);
     uint8_t mask = (1u << bit_pos);
-    printf("TCP packet: seq=%u\n", ntohl(tcph->seq));
-    printf("TCP header CRC32: %u\n", digest);
-    printf("TCP timestamp value: %u\n", tsval);
-    printf("Bit index: %u, Key bit: %u, Plain text bit: %u, Hashed bit: %u\n", bit_index, key_bit, plain_text_bit,
-           cipher_text_bit);
+    // printf("TCP packet: seq=%u\n", ntohl(tcph->seq));
+    // printf("TCP header CRC32: %u\n", digest);
+    // printf("TCP timestamp value: %u\n", tsval);
+    // printf("Bit index: %u, Key bit: %u, Plain text bit: %u, Hashed bit: %u\n", bit_index, key_bit, plain_text_bit,
+    //        cipher_text_bit);
+    pthread_mutex_lock(&mutex);
     message[byte_idx] = (message[byte_idx] & ~mask) | ((plain_text_bit << bit_pos) & mask);
-    //
-    printf("\r\033[Kmessage:%.15s\n", message);
-    fflush(stdout);
+    pthread_mutex_unlock(&mutex);
+    crc = crc32((unsigned char *)message, 28);
+    if (crc != 0 && (memcmp((uint32_t *)(message + 28), &crc, sizeof(uint32_t)) == 0))
+    {
+        printf("%.28s", message);
+        fflush(stdout);
+        memset(message, 0, sizeof(message));
+    }
+    // printf("Current message: %.28s\n", message);
 }
 
 int main(int argc, char *argv[]) {
