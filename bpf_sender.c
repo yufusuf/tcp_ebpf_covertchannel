@@ -46,14 +46,12 @@ static __always_inline int get_tsval(struct tcphdr *tcph, __u32 **tsval, void *d
     return 0;
 }
 
-static __always_inline void reset_tx_cnt(void)
-{
+static __always_inline void reset_tx_cnt(void) {
     for (__u32 i = 0; i < 256; i++) {
         __u32 k = i;
         __u64 *v = bpf_map_lookup_elem(&tx_cnt, &k);
         if (v)
             bpf_map_update_elem(&tx_cnt, &k, &((__u64){0}), BPF_ANY);
-
     }
 }
 
@@ -61,27 +59,27 @@ static __always_inline void incr_tx_count(__u32 bit_index) {
     __u64 *tscount = bpf_map_lookup_elem(&tx_cnt, &bit_index);
     if (tscount) {
         __u64 old_val = __sync_fetch_and_add(tscount, 1);
-        if( old_val  !=  OCCUPATION)
+        if (old_val != OCCUPATION)
             return;
-        
-        __u32 key = 0;
-        __u64 *done = bpf_map_lookup_elem(&done_cnt, &key);
+
+        __u64 *done = bpf_map_lookup_elem(&done_cnt, &(__u32){0});
         if (!done) {
             bpf_printk("Failed to lookup done count map\n");
             return;
         }
         __u64 prev = __sync_fetch_and_add(done, 1);
-        if( prev + 1 == MESSAGE_SIZE * 8) {
+        if (prev + 1 == MESSAGE_SIZE * 8) {
             __sync_fetch_and_add(&cur_idx, 1);
             *done = 0;
             reset_tx_cnt();
             bpf_printk("All bits transmitted successfully, next index:%u \n", cur_idx);
-            if(cur_idx == 27){
-                is_done = 1;
-                bpf_printk("Transmission completed, stopping further processing.\n");
-            }
-        }
 
+            __u64 *tot_len = bpf_map_lookup_elem(&state_map, &(__u32){1});
+            if (tot_len && cur_idx < *tot_len)
+                return;
+            is_done = 1;
+            bpf_printk("Transmission completed, stopping further processing.\n");
+        }
     }
     else {
         __u8 initial_value = 1;
@@ -134,13 +132,12 @@ int tcp_processor(struct __sk_buff *skb) {
             __u8 key_bit = get_key_bit(crc);
             __u32 key = cur_idx;
             __u8 *message = bpf_map_lookup_elem(&message_map, &key);
-            if(!message)
-            {
+            if (!message) {
                 bpf_printk("Failed to lookup message map\n");
                 goto out;
             }
-            //print current message
-            // bpf_printk("Current message: %28s\n", message);
+            // print current message
+            //  bpf_printk("Current message: %28s\n", message);
             __u8 plain_text_bit = message[bit_index / 8] >> (7 - (bit_index % 8)) & 0x01;
             __u8 hashed_bit = key_bit ^ plain_text_bit;
 

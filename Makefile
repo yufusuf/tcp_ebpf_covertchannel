@@ -1,7 +1,11 @@
-compile: bpf_sender.c
+.PHONY: manager 
+
+
+sender: bpf_sender.c
 	clang -O2 -g -Wall -target bpf -c bpf_sender.c -o bpf_sender.o
-compile_loader:
-	gcc -O2 -Wall -o bpf_map_manager bpf_map_manager.c -lbpf -lelf
+manager:
+	$(MAKE) -C manager
+	cp -f manager/bpf_map_manager .
 # gen_skel:
 # 	bpftool gen skeleton bpf_sender.o > bpf_sender.skel.h
 clean:
