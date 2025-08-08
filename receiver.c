@@ -72,8 +72,7 @@ void packet_handler(u_char *user, const struct pcap_pkthdr *h, const u_char *byt
     message[byte_idx] = (message[byte_idx] & ~mask) | ((plain_text_bit << bit_pos) & mask);
     pthread_mutex_unlock(&mutex);
     crc = crc32((unsigned char *)message, 28);
-    if (crc != 0 && (memcmp((uint32_t *)(message + 28), &crc, sizeof(uint32_t)) == 0))
-    {
+    if (crc != 0 && (memcmp((uint32_t *)(message + 28), &crc, sizeof(uint32_t)) == 0)) {
         printf("%.28s", message);
         fflush(stdout);
         memset(message, 0, sizeof(message));
@@ -83,7 +82,7 @@ void packet_handler(u_char *user, const struct pcap_pkthdr *h, const u_char *byt
 
 int main(int argc, char *argv[]) {
 
-    char *dev = "veth_insec";
+    char *dev = "eth0";
     char errbuf[PCAP_ERRBUF_SIZE];
     pcap_t *handle;
     pcap_dumper_t *dumper;

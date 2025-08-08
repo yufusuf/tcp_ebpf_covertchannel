@@ -11,9 +11,9 @@ manager:
 clean:
 	rm -f bpf_sender.o
 load:
-	sudo ip netns exec sec tc filter add dev veth_sec egress bpf da obj bpf_sender.o verbose
+	sudo ip netns exec sec tc filter add dev eth0 egress bpf da obj bpf_sender.o verbose
 unload:
-	sudo ip netns exec sec tc filter del dev veth_sec egress
+	sudo ip netns exec sec tc filter del dev eth0 egress
 run_dummy_sender:
 	# sudo ip netns exec insec socat -v -d STDIN TCP:10.0.0.1:1234
 	# sudo ip netns exec insec socat -u -b 32768 /dev/urandom TCP:10.0.0.1:1234,tcp-nodelay

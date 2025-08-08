@@ -5,6 +5,7 @@
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_endian.h>
 #include <linux/pkt_cls.h>
+#include <sys/cdefs.h>
 
 #include "parsing_helpers.h"
 #include "crc.h"
@@ -27,7 +28,6 @@
 #define MESSAGE_SIZE 32
 #define OCCUPATION 3
 
-__u8 is_done = 0;
 __u32 cur_idx = 0;
 
 static __always_inline int get_tsval(struct tcphdr *tcph, __u32 **tsval, void *data_end) {
@@ -77,8 +77,9 @@ static __always_inline void incr_tx_count(__u32 bit_index) {
             __u64 *tot_len = bpf_map_lookup_elem(&state_map, &(__u32){1});
             if (tot_len && cur_idx < *tot_len)
                 return;
-            is_done = 1;
-            bpf_printk("Transmission completed, stopping further processing.\n");
+
+            cur_idx = 0;
+            bpf_printk("Transmission completed, restarting.\n");
         }
     }
     else {
@@ -86,15 +87,21 @@ static __always_inline void incr_tx_count(__u32 bit_index) {
         bpf_map_update_elem(&tx_cnt, &bit_index, &initial_value, BPF_ANY);
     }
 }
+static __always_inline void update_stats(__u64 start) {
+    struct stats *s = bpf_map_lookup_elem(&stats_map, &(__u32){0});
+
+    if (s) {
+        s->total_time += bpf_ktime_get_ns() - start;
+        s->packet_count += 1;
+    }
+}
 SEC("classifier")
 int tcp_processor(struct __sk_buff *skb) {
+    __u64 time = bpf_ktime_get_ns();
     void *data_end = (void *)(long)skb->data_end;
     void *data = (void *)(long)skb->data;
     struct hdr_cursor nh = {.pos = data};
     int eth_type, ip_type, ret = TC_ACT_OK;
-
-    if (is_done)
-        goto out;
 
     struct iphdr *iphdr;
     struct tcphdr *tcph;
@@ -136,17 +143,20 @@ int tcp_processor(struct __sk_buff *skb) {
                 bpf_printk("Failed to lookup message map\n");
                 goto out;
             }
-            // print current message
-            //  bpf_printk("Current message: %28s\n", message);
             __u8 plain_text_bit = message[bit_index / 8] >> (7 - (bit_index % 8)) & 0x01;
             __u8 hashed_bit = key_bit ^ plain_text_bit;
 
             if ((bpf_ntohl(*tsval) & 1) != hashed_bit) {
                 *tsval = bpf_htonl(bpf_ntohl(*tsval) + 1);
-            }
 
+                // delay packet for 1ms
+                const __u64 delay = 1e6;
+                __u64 now = bpf_ktime_get_ns();
+                bpf_skb_set_tstamp(skb, now + delay, 1);
+            }
             // update the transmission count map
             incr_tx_count(bit_index);
+            update_stats(time);
         }
         else {
             bpf_printk("TCP timestamp option not found or invalid\n");

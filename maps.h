@@ -39,4 +39,15 @@ struct {
     __uint(max_entries, 3);
 } state_map SEC(".maps");
 
+
+struct stats {
+    __u64 packet_count; // total packets processed
+    __u64 total_time; // time taken for each packet
+};
+struct {
+    __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+    __type(key, __u32);
+    __type(value, struct stats);
+    __uint(max_entries, 1); 
+} stats_map SEC(".maps");
 #endif // !__MAPS_H

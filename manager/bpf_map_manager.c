@@ -11,10 +11,13 @@
 #define MESSAGE_SIZE 32
 #define CRC_SIZE 4
 #define CRC_OFFSET 28
-#define IF_INTERFACE "veth_sec"
-
-const char *message_map_pin_path = "/sys/fs/bpf/message_map";
-const char *status_map_ping_path = "/sys/fs/bpf/status_map";
+#define IF_INTERFACE "eth0"
+struct stats
+{
+    __u64 packet_count;
+    __u64 total_time;
+};
+const char *stat_map_pin_path = "/sys/fs/bpf/stats_map";
 const char *obj_path = "bpf_sender.o";
 
 uint32_t crc32(const unsigned char *data, size_t length) {
@@ -35,9 +38,9 @@ unsigned char *prepare_payload(const char *str) {
 
     uint32_t crc = crc32(buf, msg_len);
     // print message and crc
-    printf("Message: %.*s\n", (int)msg_len, buf);
-    printf("CRC32: %08x\n", crc);
-
+    // printf("Message: %.*s\n", (int)msg_len, buf);
+    // printf("CRC32: %08x\n", crc);
+    //
     // Append CRC32 little-endian
     buf[msg_len + 0] = (uint8_t)(crc & 0xFF);
     buf[msg_len + 1] = (uint8_t)((crc >> 8) & 0xFF);
@@ -109,8 +112,8 @@ int attach_prog_to_tc(struct bpf_object *obj, const char *prog_name) {
     }
 
     struct bpf_tc_opts opts = {
-        .sz = sizeof(opts), 
-        .prog_fd = prog_fd, 
+        .sz = sizeof(opts),
+        .prog_fd = prog_fd,
         .flags = BPF_TC_F_REPLACE,
         .handle = 1,
         .priority = 1,
@@ -124,6 +127,7 @@ int attach_prog_to_tc(struct bpf_object *obj, const char *prog_name) {
 int main(int argc, char **argv) {
 
     struct args args;
+    // todo: args are not used yet
     parse_args(argc, argv, &args);
 
     struct bpf_object *obj;
@@ -144,7 +148,7 @@ int main(int argc, char **argv) {
             .attach_point = BPF_TC_EGRESS,
         };
         struct bpf_tc_opts opts = {
-            .prog_fd = 0, 
+            .prog_fd = 0,
             .flags = 0,
             .prog_id = 0,
             .handle = 1,
@@ -154,6 +158,37 @@ int main(int argc, char **argv) {
 
         if (bpf_tc_detach(&hook, &opts) < 0) {
             perror("Failed to detach BPF program from TC hook");
+            return 1;
+        }
+
+        int fd = bpf_obj_get(stat_map_pin_path);
+        if (fd < 0) {
+            perror("Failed to get stats map file descriptor");
+            return 1;
+        }
+
+        unsigned int nr_cpus = libbpf_num_possible_cpus();
+        struct stats values[nr_cpus];
+        __u64 packets = 0;
+        __u64 total_time = 0;
+
+        if (bpf_map_lookup_elem(fd, &(__u32){0}, values) < 0) {
+            perror("Failed to lookup stats map");
+            return 1;
+        }
+
+        for (unsigned int i = 0; i < nr_cpus; i++) {
+            packets += values[i].packet_count;
+            total_time += values[i].total_time;
+        }
+
+        printf("Total packets processed: %llu\n", packets);
+        printf("Total time taken: %f ms\n", total_time / 1000000.0);
+        printf("Average time per packet: %f ns\n", packets ? (total_time) / (double)packets : 0);
+
+        struct bpf_map *stat_map = bpf_object__find_map_by_name(obj, "stats_map");
+        if (bpf_map__unpin(stat_map, stat_map_pin_path) < 0) {
+            perror("Failed to unpin stats_map");
             return 1;
         }
         return 0;
@@ -178,11 +213,27 @@ int main(int argc, char **argv) {
     __u32 key = 1;
     __u64 initial_value = mes_len;
     if (bpf_map_update_elem(map_fd, &key, &initial_value, BPF_ANY) < 0) {
-        perror("Failed to update status map");
+        perror("Failed to update status map: mes len could not be set");
         return 1;
     }
 
     attach_prog_to_tc(obj, "tcp_processor");
+    if (access(stat_map_pin_path, F_OK) != -1) {
+        printf("unpinning maps...\n");
+        if (bpf_object__unpin_maps(obj, "/sys/fs/bpf/") < 0) {
+            perror("Failed to unpin maps");
+            return 1;
+        }
+    }
+
+    struct bpf_map *stat_map = bpf_object__find_map_by_name(obj, "stats_map");
+    if (!stat_map) {
+        perror("Failed to find stats map");
+        return 1;
+    }
+    if (bpf_map__pin(stat_map, stat_map_pin_path) == 0) {
+        printf("Pinned stats map to %s\n", stat_map_pin_path);
+    }
 
     return 0;
 }
