@@ -204,7 +204,7 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    int mes_len = fill_message_map(map_fd, "sonnet.txt");
+    int mes_len = fill_message_map(map_fd, args.message_file);
     map_fd = get_map_fd(obj, "state_map");
     if (map_fd < 0) {
         perror("Failed to get map file descriptor for state_map");

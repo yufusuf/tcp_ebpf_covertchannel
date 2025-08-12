@@ -6,7 +6,6 @@ struct args {
     const char *iface;   
     const char *message_file;  
     int detach;         
-    int reset;
     int show_help;     
 };
 

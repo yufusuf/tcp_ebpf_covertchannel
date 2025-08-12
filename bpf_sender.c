@@ -102,6 +102,8 @@ int tcp_processor(struct __sk_buff *skb) {
     void *data = (void *)(long)skb->data;
     struct hdr_cursor nh = {.pos = data};
     int eth_type, ip_type, ret = TC_ACT_OK;
+    // update_stats(time);
+    // return ret;
 
     struct iphdr *iphdr;
     struct tcphdr *tcph;
