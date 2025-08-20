@@ -82,7 +82,7 @@ void packet_handler(u_char *user, const struct pcap_pkthdr *h, const u_char *byt
 
 int main(int argc, char *argv[]) {
 
-    char *dev = "eth0";
+    char *dev = "ifb0";
     char errbuf[PCAP_ERRBUF_SIZE];
     pcap_t *handle;
     pcap_dumper_t *dumper;

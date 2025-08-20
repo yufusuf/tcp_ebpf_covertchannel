@@ -18,8 +18,8 @@ void print_usage(const char *prog) {
     fprintf(stderr, "  -h, --help             Show this help message\n");
 }
 int parse_args(int argc, char **argv, struct args *out) {
-    *out = (struct args){
-        .obj = "bpf_sender.o", .iface = "eth0", .message_file = "sonnet.txt", .detach = 0, .show_help = 0};
+    *out =
+        (struct args){.obj = "bpf_sender.o", .iface = "eth0", .message_file = "input.txt", .detach = 0, .show_help = 0};
     int opt, idx;
     while ((opt = getopt_long(argc, argv, "o:f:i:dh", long_opts, &idx)) != -1) {
         switch (opt) {
@@ -42,4 +42,3 @@ int parse_args(int argc, char **argv, struct args *out) {
     }
     return 0;
 }
-
